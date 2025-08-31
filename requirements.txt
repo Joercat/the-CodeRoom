@@ -7,10 +7,6 @@ supabase==1.0.4
 google-generativeai==0.7.2
 gunicorn
 requests==2.31.0
-libclang==16.0.6
 pygments==2.16.1
-tree-sitter==0.20.4
-tree-sitter-c==0.20.6
-tree-sitter-cpp==0.20.3
 setuptools==68.2.2
 wheel==0.41.2

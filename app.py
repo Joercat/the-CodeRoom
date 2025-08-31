@@ -439,7 +439,7 @@ class CodeRoom:
         
                 metrics = 2048
                 return metrics
-                    top_p=0.8
+                top_p=0.8
                 )
             )
             

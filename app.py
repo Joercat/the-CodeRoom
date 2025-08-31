@@ -1740,6 +1740,96 @@ int main() {
         let currentErrors = [];
         let currentWarnings = [];
 
+        // Helper functions
+        function generateUserId() {
+            return 'user_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function setupSocketListeners() {
+            socket.on('user_joined', function(data) {
+                updateActiveUsers(data.active_users);
+                updateStatus(`${data.user_id} joined the file`);
+            });
+
+            socket.on('user_left', function(data) {
+                updateActiveUsers(data.active_users);
+                updateStatus(`${data.user_id} left the file`);
+            });
+
+            socket.on('code_updated', function(data) {
+                if (data.user_id !== userId) {
+                    const cursor = editor.getCursor();
+                    editor.setValue(data.content);
+                    editor.setCursor(cursor);
+                    updateStatus(`Code updated by ${data.user_id}`);
+                }
+            });
+
+            socket.on('cursor_updated', function(data) {
+                updateOtherCursor(data.user_id, data.cursor_pos);
+            });
+        }
+
+        function broadcastCodeChange() {
+            if (socket && currentFile) {
+                socket.emit('code_change', {
+                    file_id: currentFile.id,
+                    content: editor.getValue(),
+                    cursor_pos: editor.getCursor()
+                });
+            }
+        }
+
+        function updateActiveUsers(users) {
+            const activeUsersDiv = document.getElementById('active-users');
+            let html = '<span>👥 Active Users:</span>';
+            
+            users.forEach(user => {
+                const avatar = user.slice(-2).toUpperCase();
+                html += `<div class="user-avatar" title="${user}">${avatar}</div>`;
+            });
+            
+            activeUsersDiv.innerHTML = html;
+        }
+
+        function updateOtherCursor(userId, cursorPos) {
+            // Remove existing cursor for this user
+            const existingMarker = document.querySelector(`[data-user="${userId}"]`);
+            if (existingMarker) {
+                existingMarker.remove();
+            }
+            
+            // Add new cursor marker
+            const marker = document.createElement('div');
+            marker.className = 'cursor-marker';
+            marker.setAttribute('data-user', userId);
+            marker.style.borderColor = getUserColor(userId);
+            marker.title = `${userId} cursor`;
+            
+            try {
+                const coords = editor.charCoords(cursorPos, 'local');
+                marker.style.left = coords.left + 'px';
+                marker.style.top = coords.top + 'px';
+                document.querySelector('.CodeMirror').appendChild(marker);
+                
+                // Remove after 3 seconds of inactivity
+                setTimeout(() => {
+                    const stillThere = document.querySelector(`[data-user="${userId}"]`);
+                    if (stillThere) stillThere.remove();
+                }, 3000);
+            } catch (e) {
+                // Cursor position might be invalid
+            }
+        }
+
+        function getUserColor(userId) {
+            const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3'];
+            const hash = userId.split('').reduce((a, b) => {
+                a = ((a << 5) - a) + b.charCodeAt(0);
+                return a & a;
+            }, 0);
+            return colors[Math.abs(hash) % colors.length];
+        }
         // Custom autocomplete function
         async function customHint(editor, options) {
             const cursor = editor.getCursor();
@@ -2187,9 +2277,20 @@ int main() {
                 const suggestionsDiv = document.getElementById('ai-suggestions');
                 suggestionsDiv.innerHTML = '<div class="loading"></div> Getting AI suggestions...';
                 
+                // Get current syntax errors for context
+                const syntaxResult = await apiCall('/api/syntax-check', {
+                    method: 'POST',
+                    body: JSON.stringify({ code, language })
+                });
+                
+                let errorContext = "";
+                if (syntaxResult.errors && syntaxResult.errors.length > 0) {
+                    errorContext = syntaxResult.errors.map(err => `Line ${err.line}: ${err.message}`).join('\n');
+                }
+                
                 const result = await apiCall('/api/ai-assist', {
                     method: 'POST',
-                    body: JSON.stringify({ code, language, prompt })
+                    body: JSON.stringify({ code, language, prompt, error_context: errorContext })
                 });
                 
                 suggestionsDiv.innerHTML = `
@@ -2266,18 +2367,24 @@ int main() {
             }
         });
 
-        // Auto-save functionality
+        // Auto-save functionality with conflict resolution
         let autoSaveTimeout;
-        if (editor) {
-            editor.on('change', function() {
-                clearTimeout(autoSaveTimeout);
-                autoSaveTimeout = setTimeout(() => {
-                    if (currentFile && currentBranch) {
-                        saveCurrentFile();
-                    }
-                }, 5000); // Auto-save after 5 seconds of inactivity
-            });
+        
+        function setupAutoSave() {
+            if (editor) {
+                editor.on('change', function() {
+                    clearTimeout(autoSaveTimeout);
+                    autoSaveTimeout = setTimeout(() => {
+                        if (currentFile && currentBranch && isFileOwner) {
+                            saveCurrentFile();
+                        }
+                    }, 5000); // Auto-save after 5 seconds of inactivity
+                });
+            }
         }
+
+        // Initialize auto-save after editor is ready
+        setTimeout(setupAutoSave, 1000);
 
         // Close modals when clicking outside
         window.onclick = function(event) {
@@ -2304,39 +2411,6 @@ def create_templates():
     
     with open('templates/index.html', 'w') as f:
         f.write(html_template)
-
-# Database initialization (run this once)
-def init_database():
-    """
-    Run this function once to set up your Supabase tables.
-    
-    Create these tables in your Supabase dashboard:
-    
-    1. repositories:
-       - id: text (primary key)
-       - name: text
-       - description: text
-       - created_at: timestamp
-       - owner: text
-    
-    2. branches:
-       - id: text (primary key)
-       - repo_id: text (foreign key to repositories.id)
-       - name: text
-       - created_at: timestamp
-       - created_by: text
-    
-    3. files:
-       - id: text (primary key)
-       - branch_id: text (foreign key to branches.id)
-       - filename: text
-       - content: text
-       - language: text
-       - created_at: timestamp
-       - updated_at: timestamp
-       - updated_by: text
-    """
-    pass
 
 if __name__ == '__main__':
     # Set session user ID if not exists

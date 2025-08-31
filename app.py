@@ -437,7 +437,8 @@ class CodeRoom:
             if 'gets(' in line:
                 metrics['potential_issues'].append('Security vulnerability: gets() is unsafe, use fgets() instead')
         
-        return metrics=2048,
+              metrics = 2048
+              return metrics
                     top_p=0.8
                 )
             )
